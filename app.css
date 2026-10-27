@@ -240,3 +240,12 @@ td.r, th.r { text-align: right; }
   .tabbar { max-width: 560px; left: 50%; transform: translateX(-50%); border: 1px solid var(--line); border-bottom: 0; border-radius: 16px 16px 0 0; }
 }
 @media (prefers-reduced-motion: reduce) { .spin svg { animation: none; } }
+
+/* ---------- Ergebnisse nachgetragen ---------- */
+.kvlist { display: flex; flex-direction: column; }
+.kvrow { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line-soft); font-size: 14px; }
+.kvrow span:first-child { color: var(--muted); flex: 0 0 auto; }
+.kvrow span:last-child { font-family: var(--mono); font-weight: 600; text-align: right; }
+.signal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-size: 13px; color: var(--text-2); }
+.signal b { color: var(--text); }
+.day.fresh h2 { color: var(--up); }

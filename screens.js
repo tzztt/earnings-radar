@@ -4,6 +4,7 @@
 const C = window.__core;
 const { state, KEY, TIME, CRV_NAMES, esc, num, pct, big, price, sym, dShort, dLong, dDot, dMini, dayLabel, clock, stamp, diffDays, todayIso,
   verdict, VCLASS, lastOf, isCustomer, custKind, crvOf, relDate, relWord, RELCLASS, badge, badgesFor, rsiClass, crvClass, crvSwitch, stockRow, spark, ICON,
+  APP_VERSION, reportedList, lastReported, isUpcoming, nextEstimate, resultItem, FRESH_DAYS,
   toDataUrl, fetchJson, setData, loadDemo, refresh, render, lsGet, lsSet, lsDel, hideBanner, validate } = C;
 
 // ============================================================ Einrichtung
@@ -79,9 +80,68 @@ function levelsFor(s) {
 }
 const DOT = { hi: "#FF8A8A", res: "#FF8A8A", sup: "#3FD08A", lo: "#3FD08A", sma: "#6CB6FF", now: "#F2B544" };
 
+/* Ergebnis eines Kunden/Zulieferers an einem bestimmten Tag (falls schon gemeldet). */
+function custResult(t, d) {
+  const cs = state.by[t];
+  if (!cs || !d) return null;
+  const rec = reportedList(cs).find((r) => r.date === d);
+  return rec ? { rec, v: verdict(rec) } : null;
+}
+function relRow(t, d, ref, extra = "") {
+  const res = custResult(t, d), done = res && res.v.k !== "pending";
+  const r = d ? relWord(d, ref) : null;
+  const mv = done && res.rec.reaction ? res.rec.reaction.move_pct : null;
+  const text = `${d ? dShort(d) : "Termin unbekannt"}${mv != null ? " · Kurs " + pct(mv) : ""}${extra}`;
+  return `<a href="#/aktie/${encodeURIComponent(t)}"><span class="t">${esc(t)}</span><span class="grow muted" style="font-size:13px">${esc(text)}</span>${done ? badge(res.v.label, VCLASS[res.v.k]) : r ? badge(r, RELCLASS[r]) : ""}${ICON.chev}</a>`;
+}
+/* Zusammenfassung: wie viele haben schon gemeldet, wie fiel es aus? */
+function signalHtml(rows, noun) {
+  const done = rows.filter((r) => r.res && r.res.v.k !== "pending");
+  if (!rows.length) return "";
+  const n = (k) => done.filter((r) => r.res.v.k === k).length;
+  const moves = done.map((r) => r.res.rec.reaction && r.res.rec.reaction.move_pct).filter((x) => x != null);
+  const avg = moves.length ? moves.reduce((a, b) => a + b, 0) / moves.length : null;
+  const parts = [];
+  if (done.length) { parts.push(`${n("beat")} Beat`, `${n("miss")} Miss`); if (n("inline")) parts.push(`${n("inline")} im Rahmen`); }
+  return `<div class="signal"><b>${done.length} von ${rows.length}</b> ${noun} haben gemeldet${parts.length ? ": " + parts.join(", ") : ""}${avg != null ? ` · Ø Kursreaktion ${pct(avg)}` : ""}</div>`;
+}
+
+/* Karte mit den zuletzt gemeldeten Zahlen. fresh = in den letzten Tagen gemeldet (dann steht sie ganz oben). */
+function lastResultCard(s) {
+  const h = lastReported(s);
+  if (!h) return { html: "", fresh: false };
+  const v = verdict(h), rx = h.reaction, t = s.tech, cur = sym(s.currency);
+  const fresh = diffDays(todayIso(), h.date) <= FRESH_DAYS;
+  const revS = C.surprise(h.rev_act, h.rev_est);
+  const since = rx && t && rx.close_before ? (t.close / rx.close_before - 1) * 100 : null;
+  const tone = v.k === "beat" ? "#1E5C3A" : v.k === "miss" ? "#6B2B2B" : "var(--line)";
+  const row = (l, val, cls = "") => `<div class="kvrow"><span>${l}</span><span class="${cls}">${val}</span></div>`;
+  const when = [dLong(h.date), TIME[h.time]].filter(Boolean).join(" · ");
+  const eps = h.eps_act == null ? "noch nicht in den Daten"
+    : `${num(h.eps_act)}${h.eps_est != null ? " vs. " + num(h.eps_est) : ""} ${cur}${v.s != null ? ` (${pct(v.s)})` : ""}`;
+  const rev = h.rev_act == null ? "noch nicht in den Daten"
+    : `${big(h.rev_act)}${h.rev_est != null ? " vs. " + big(h.rev_est) : ""}${revS != null ? ` (${pct(revS)})` : ""}`;
+  const html = `<section class="card" style="border-color:${tone}" aria-label="${fresh ? "Gerade gemeldet" : "Letzte Earnings"}">
+    <div class="card-head"><h2 style="color:${fresh ? "var(--text)" : "var(--muted)"}">${fresh ? "Gerade gemeldet" : "Letzte Earnings"}</h2>${badge(v.label, VCLASS[v.k])}</div>
+    <p style="font-size:14px;color:var(--text-2)">${esc(when)}</p>
+    <div class="kvlist">
+      ${row("EPS", esc(eps))}
+      ${row("Umsatz", esc(rev))}
+      ${row("Kursreaktion", rx ? `${pct(rx.move_pct)} · Gap ${pct(rx.gap_pct)}` : "folgt am nächsten Handelstag", rx ? (rx.move_pct >= 0 ? "up" : "down") : "muted")}
+      ${rx && rx.rel_volume != null ? row("Volumen am Tag", num(rx.rel_volume, 1) + "× Ø") : ""}
+      ${since != null ? row("Kurs seit Meldung", pct(since), since >= 0 ? "up" : "down") : ""}
+    </div></section>`;
+  return { html, fresh };
+}
+
 function earnCard(s) {
   const n = s.next, cur = s.currency;
-  if (!n) return `<section class="card"><div class="card-head"><h2 style="color:var(--muted)">Earnings</h2></div><p class="muted">Kein kommender Termin bekannt. Bei ausländischen Werten fehlt er teils in den Daten.</p></section>`;
+  if (!n || !isUpcoming(s)) {
+    const est = nextEstimate(s);
+    return `<section class="card"><div class="card-head"><h2 style="color:var(--muted)">Nächste Earnings</h2>${badge("noch offen", "b-dash")}</div><p style="font-size:14px;color:var(--text-2)">${est
+      ? `Noch kein Termin bestätigt. Voraussichtlich ${esc(dShort(est))} (Schätzung nach dem letzten Rhythmus).`
+      : "Kein kommender Termin bekannt. Bei ausländischen Werten fehlt er teils in den Daten."}</p></section>`;
+  }
   const dd = diffDays(n.date, todayIso());
   const when = dd === 0 ? "heute" : dd === 1 ? "morgen" : dd > 1 ? `in ${dd} Tagen` : `vor ${-dd} Tagen`;
   const time = [TIME[n.time] || "Uhrzeit offen", clock(n.ts) && `${clock(n.ts)} Uhr`].filter(Boolean).join(" · ");
@@ -89,6 +149,7 @@ function earnCard(s) {
   return `<section class="card earn" aria-label="Nächste Earnings">
     <div class="card-head"><h2>Earnings ${esc(when)}</h2>${status}</div>
     <p style="font-size:16px;font-weight:600">${esc(dLong(n.date))} · ${esc(time)}</p>
+    ${dd < 0 ? `<p class="warn hot">Zahlen noch nicht in den Daten. Sie erscheinen mit dem nächsten Lauf.</p>` : ""}
     <div class="kv3">
       <div><span class="lbl">EPS-Erwartung</span><span class="val">${n.eps_est != null ? num(n.eps_est) + " " + esc(sym(cur)) : "–"}</span></div>
       <div><span class="lbl">Umsatz-Erw.</span><span class="val">${n.rev_est != null ? big(n.rev_est) : "–"}</span></div>
@@ -157,20 +218,17 @@ window.__aktie = (ticker) => {
 
   let custs = "";
   if ((s.customers || []).length) {
-    const rows = s.customers.filter((c) => state.by[c]).map((c) => ({ c, d: relDate(c, ref) })).sort((a, b) => (a.d || "9999").localeCompare(b.d || "9999"));
-    custs = `<section class="stack-sm" aria-labelledby="h-cu"><h2 id="h-cu" class="section-title">Earnings der Kunden</h2><div class="list-card">${rows.map(({ c, d }) => {
-      const r = d ? relWord(d, ref) : null;
-      return `<a href="#/aktie/${encodeURIComponent(c)}"><span class="t">${esc(c)}</span><span class="grow muted" style="font-size:13px">${d ? esc(dShort(d)) : "Termin unbekannt"}</span>${r ? badge(r, RELCLASS[r]) : ""}${ICON.chev}</a>`;
-    }).join("")}</div><p class="warn">„vorher“ = der Kunde meldet vor ${esc(s.ticker)}.</p></section>`;
+    const rows = s.customers.filter((c) => state.by[c]).map((c) => { const d = relDate(c, ref); return { c, d, res: custResult(c, d) }; })
+      .sort((a, b) => (a.d || "9999").localeCompare(b.d || "9999"));
+    custs = `<section class="stack-sm" aria-labelledby="h-cu"><h2 id="h-cu" class="section-title">Earnings der Kunden</h2>${signalHtml(rows, "Kunden")}<div class="list-card">${rows.map(({ c, d }) => relRow(c, d, ref)).join("")}</div><p class="warn">„vorher“ = der Kunde meldet vor ${esc(s.ticker)}. Gemeldete Kunden zeigen Beat/Miss und Kursreaktion.</p></section>`;
   }
   let sups = "";
   if (isCustomer(s)) {
-    const rows = s.suppliers.filter((x) => state.by[x]).map((x) => ({ x, d: relDate(x, ref) })).sort((a, b) => (a.d || "9999").localeCompare(b.d || "9999"));
-    sups = `<section class="stack-sm" aria-labelledby="h-su"><h2 id="h-su" class="section-title">Zulieferer in deiner Watchlist</h2><div class="list-card">${rows.map(({ x, d }) => {
-      const r = d ? relWord(d, ref) : null;
-      return `<a href="#/aktie/${encodeURIComponent(x)}"><span class="t">${esc(x)}</span><span class="grow muted" style="font-size:13px">${d ? esc(dShort(d)) : "Termin unbekannt"}</span>${r ? badge(r, RELCLASS[r]) : ""}${ICON.chev}</a>`;
-    }).join("")}</div></section>`;
+    const rows = s.suppliers.filter((x) => state.by[x]).map((x) => { const d = relDate(x, ref); return { x, d, res: custResult(x, d) }; })
+      .sort((a, b) => (a.d || "9999").localeCompare(b.d || "9999"));
+    sups = `<section class="stack-sm" aria-labelledby="h-su"><h2 id="h-su" class="section-title">Zulieferer in deiner Watchlist</h2>${signalHtml(rows, "Zulieferer")}<div class="list-card">${rows.map(({ x, d }) => relRow(x, d, ref)).join("")}</div></section>`;
   }
+  const lr = lastResultCard(s);
   const hist = (s.history || []).slice(-6).reverse();
   const histHtml = hist.length ? `<section class="stack-sm" aria-labelledby="h-hi"><h2 id="h-hi" class="section-title">Letzte Earnings</h2>
     <table><thead><tr><th scope="col">Datum</th><th scope="col">EPS</th><th scope="col" class="r">Kurs</th></tr></thead><tbody>${hist.map((h) => {
@@ -183,7 +241,7 @@ window.__aktie = (ticker) => {
       <div class="row-flex" style="margin-top:6px;flex-wrap:wrap"><span class="muted" style="font-size:12px">${esc(s.section || "")}${s.extra ? " (nicht in der Watchlist)" : ""}</span>${badgesFor(s)}</div>
       ${t ? `<div class="price"><b>${num(t.close, t.close >= 1 ? 2 : 4)} ${esc(sym(cur))}</b>${chg}</div>${spark(t.spark)}` : ""}
       ${s.note ? `<p class="warn" style="margin-top:6px">Hinweis: ${esc(s.note)} (${esc(s.yahoo)})</p>` : ""}</header>
-    ${earnCard(s)}${tech}${custs}${sups}${histHtml}</div>`;
+    ${lr.fresh ? lr.html + earnCard(s) : earnCard(s) + lr.html}${tech}${custs}${sups}${histHtml}</div>`;
 };
 
 // ============================================================ Kunden
@@ -191,33 +249,37 @@ window.__kunden = () => {
   const d = state.data, ui = state.ui;
   const names = d.customers || {};
   const list = Object.keys(names).filter((t) => state.by[t]).sort((a, b) => {
-    const da = state.by[a].next ? state.by[a].next.date : "9999", db = state.by[b].next ? state.by[b].next.date : "9999";
+    const da = isUpcoming(state.by[a]) ? state.by[a].next.date : "9999", db = isUpcoming(state.by[b]) ? state.by[b].next.date : "9999";
     return da.localeCompare(db) || a.localeCompare(b);
   });
   if (!list.length) return `<div class="stack"><header class="hdr"><div><h1>Kunden-Kette</h1></div></header><div class="empty">Noch keine Kunden hinterlegt. Trag sie in <b>customers.yaml</b> ein.</div></div>`;
   const sel = list.includes(ui.cust) ? ui.cust : list[0];
   const c = state.by[sel], meta = names[sel] || {};
-  const l = lastOf(c);
-  const date = c.next ? c.next.date : l ? l.date : null;
-  const dateLbl = c.next ? "Nächste Earnings" : "Zuletzt gemeldet";
-  const t = c.tech;
-  const sups = (c.suppliers || []).filter((x) => state.by[x]).map((x) => ({ x, d: date ? relDate(x, date) : null }))
+  const upc = isUpcoming(c) ? c.next : null, rep = lastReported(c);
+  const date = upc ? upc.date : rep ? rep.date : null;
+  const dateLbl = upc ? "Nächste Earnings" : "Zuletzt gemeldet";
+  const t = c.tech, est = !upc ? nextEstimate(c) : null;
+  const sups = (c.suppliers || []).filter((x) => state.by[x]).map((x) => { const sd = date ? relDate(x, date) : null; return { x, d: sd, res: custResult(x, sd) }; })
     .sort((a, b) => (a.d || "9999").localeCompare(b.d || "9999"));
+  let resLine = "";
+  if (rep) {
+    const v = verdict(rep), mv = rep.reaction ? rep.reaction.move_pct : null;
+    resLine = `<div class="row-flex" style="flex-wrap:wrap">${badge(v.label, VCLASS[v.k])}<span style="font-size:13px;color:#B9D8F5">${upc ? "zuletzt " + esc(dDot(rep.date)) : rep.eps_act != null ? "EPS " + num(rep.eps_act) + (rep.eps_est != null ? " vs. " + num(rep.eps_est) : "") : "Zahlen folgen"}${mv != null ? " · Kurs " + pct(mv) : ""}</span></div>`;
+  }
   return `<div class="stack"><header class="hdr"><div><h1>Kunden-Kette</h1><p>Wer berichtet vor deinen Zulieferern?</p></div></header>
     <div class="chips" role="tablist" aria-label="Kunde wählen">${list.map((k) => `<button class="chip mono" role="tab" data-act="cust" data-v="${esc(k)}" aria-selected="${k === sel}" aria-pressed="${k === sel}">${esc(k)}</button>`).join("")}</div>
     <section class="card" style="background:#0F1E30;border-color:#23476E">
       <div class="card-head"><a href="#/aktie/${encodeURIComponent(sel)}" style="font-size:20px;font-weight:600">${esc(meta.name || c.name)}</a>${badge(meta.typ || custKind(c), "b-kd")}</div>
-      <p style="font-size:15px">${esc(dateLbl)}: ${date ? esc(dLong(date)) : "unbekannt"}${c.next && TIME[c.next.time] ? " · " + esc(TIME[c.next.time]) : ""}</p>
+      <p style="font-size:15px">${esc(dateLbl)}: ${date ? esc(dLong(date)) : "unbekannt"}${upc && TIME[upc.time] ? " · " + esc(TIME[upc.time]) : ""}</p>
+      ${resLine}
+      ${est ? `<p style="font-size:13px;color:#B9D8F5">Nächster Termin noch offen. Voraussichtlich ${esc(dShort(est))} (Schätzung).</p>` : ""}
       <div class="kv3">
         <div><span class="lbl">RSI (14)</span><span class="val">${t && t.rsi != null ? num(t.rsi, 1) : "–"}</span></div>
-        <div><span class="lbl">Ø Reaktion</span><span class="val">${c.avg_move_pct != null ? "±" + num(c.avg_move_pct, 1) + " %" : "–"}</span></div>
+        <div><span class="lbl">Ø Reaktion</span><span class="val">${c.avg_move_pct != null ? "±" + num(c.avg_move_pct, 1) + "\u00a0%" : "–"}</span></div>
         <div><span class="lbl">Zulieferer</span><span class="val">${sups.length}</span></div>
       </div></section>
     <h2 class="section-title">Zulieferer in deiner Watchlist</h2>
-    ${sups.length ? `<div class="list-card">${sups.map(({ x, d: sd }) => {
-      const s = state.by[x], r = sd && date ? relWord(sd, date) : null;
-      return `<a href="#/aktie/${encodeURIComponent(x)}"><div class="grow stack-sm" style="gap:2px"><span class="t">${esc(x)}</span><span class="sub muted" style="font-size:12px">Earnings ${sd ? esc(dShort(sd)) : "unbekannt"}${s.portfolio ? " · Portfolio" : ""}</span></div>${r ? badge(r, RELCLASS[r]) : ""}${ICON.chev}</a>`;
-    }).join("")}</div><p class="warn">„danach“ = der Zulieferer berichtet nach dem Kunden. Dessen Zahlen sind dann schon bekannt.</p>` : `<div class="empty">Keine Zulieferer aus deiner Watchlist zugeordnet.</div>`}
+    ${sups.length ? `${signalHtml(sups, "Zulieferer")}<div class="list-card">${sups.map(({ x, d: sd }) => relRow(x, sd, date || todayIso(), state.by[x].portfolio ? " · Portfolio" : "")).join("")}</div><p class="warn">„danach“ = der Zulieferer berichtet nach dem Kunden. Dessen Zahlen sind dann schon bekannt.</p>` : `<div class="empty">Keine Zulieferer aus deiner Watchlist zugeordnet.</div>`}
   </div>`;
 };
 
@@ -225,25 +287,18 @@ window.__kunden = () => {
 window.__ergebnisse = () => {
   const ui = state.ui, t = todayIso(), from = C.addDays(t, -ui.resDays);
   const all = [];
-  for (const s of state.data.stocks) for (const h of s.history || []) if (h.date >= from && h.date <= t) all.push({ s, h, v: verdict(h) });
+  for (const s of state.data.stocks) for (const h of reportedList(s)) if (h.date >= from && h.date <= t) all.push({ s, h, v: verdict(h) });
   const cnt = (k) => all.filter((x) => x.v.k === k).length;
   const rows = all.filter((x) => ui.resFilter === "all" || x.v.k === ui.resFilter)
     .sort((a, b) => b.h.date.localeCompare(a.h.date) || a.s.ticker.localeCompare(b.s.ticker));
   const groups = [];
   for (const r of rows) { const g = groups[groups.length - 1]; if (g && g.date === r.h.date) g.rows.push(r); else groups.push({ date: r.h.date, rows: [r] }); }
   const pending = cnt("pending");
-  const item = ({ s, h, v }) => {
-    const rx = h.reaction, mv = rx ? rx.move_pct : null;
-    const revS = C.surprise(h.rev_act, h.rev_est);
-    const sub = h.eps_act == null ? "Zahlen folgen beim nächsten Lauf" : revS != null ? `Umsatz ${pct(revS)} vs. Erwartung` : `EPS ${num(h.eps_act)} vs. ${num(h.eps_est)}`;
-    return `<a class="item" href="#/aktie/${encodeURIComponent(s.ticker)}"><div class="grow stack-sm" style="gap:4px"><div class="line"><span class="t">${esc(s.ticker)}</span>${badge(v.label, VCLASS[v.k])}${s.portfolio ? badge("Portfolio", "b-pf") : ""}</div><span class="sub ell">${esc(sub)}</span></div>
-      <div class="right"><b style="font-size:15px" class="${mv == null ? "muted" : mv >= 0 ? "up" : "down"}">${mv == null ? "–" : pct(mv)}</b><span>${rx && rx.rel_volume != null ? "Vol " + num(rx.rel_volume, 1) + "×" : ""}</span></div>${ICON.chev}</a>`;
-  };
   return `<div class="stack"><header class="hdr"><div><h1>Ergebnisse</h1><p>${all.length} Termine in ${ui.resDays} Tagen${pending ? `, ${pending} noch ohne Zahlen` : ""}</p></div></header>
     <div class="tiles"><div class="tile"><b class="up">${cnt("beat")}</b><span>Beat</span></div><div class="tile"><b class="down">${cnt("miss")}</b><span>Miss</span></div><div class="tile"><b>${cnt("inline")}</b><span>im Rahmen</span></div></div>
     <div class="seg" role="group" aria-label="Zeitraum">${[[7, "7 Tage"], [30, "30 Tage"], [90, "90 Tage"]].map(([n, l]) => `<button data-act="resDays" data-v="${n}" aria-pressed="${ui.resDays === n}">${l}</button>`).join("")}</div>
     <div class="seg" role="group" aria-label="Filter">${[["all", "Alle"], ["beat", "Beat"], ["miss", "Miss"]].map(([k, l]) => `<button data-act="resFilter" data-v="${k}" aria-pressed="${ui.resFilter === k}">${l}</button>`).join("")}</div>
-    ${groups.length ? groups.map((g) => `<section class="day"><h2>${esc(dayLabel(g.date))}</h2><div class="rows">${g.rows.map(item).join("")}</div></section>`).join("") : `<div class="empty">Keine Ergebnisse in diesem Zeitraum.</div>`}
+    ${groups.length ? groups.map((g) => `<section class="day"><h2>${esc(dayLabel(g.date))}</h2><div class="rows">${g.rows.map(resultItem).join("")}</div></section>`).join("") : `<div class="empty">Keine Ergebnisse in diesem Zeitraum.</div>`}
   </div>`;
 };
 
@@ -267,6 +322,7 @@ window.__settings = () => {
       <div class="kv" style="width:100%"><span>Datenstand</span><span>${esc(stamp(d.generated) || "–")}</span></div>
       <div class="kv" style="width:100%"><span>Werte</span><span>${n}${d.stocks.length > n ? ` + ${d.stocks.length - n} Kunden` : ""}</span></div>
       <div class="kv" style="width:100%"><span>Kunden-Zuordnungen</span><span>${Object.keys(d.customers || {}).length}</span></div>
+      <div class="kv" style="width:100%"><span>Version</span><span>v${esc(APP_VERSION)}</span></div>
     </div>
     ${state.fromCache ? `<div class="info">Es werden gespeicherte Daten angezeigt. Der letzte Abruf hat nicht geklappt.</div>` : ""}
     <div class="btn-row">${state.demo ? `<button class="btn primary" data-act="endDemo">Demo beenden</button>` : `<button class="btn primary" data-act="reload">Jetzt aktualisieren</button>`}</div>

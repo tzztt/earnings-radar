@@ -4,6 +4,8 @@
 "use strict";
 
 // ============================================================ Konstanten & Zustand
+// Version der App: bei jeder Änderung hier hochzählen (wird in den Einstellungen angezeigt). Muster: x.xx
+const APP_VERSION = "1.11";
 const KEY = { url: "er.url", data: "er.data", crv: "er.crv", demo: "er.demo" };
 const TIME = { bmo: "vorbörslich", amc: "nachbörslich", dmh: "im Handel" };
 const CUR = { USD: "$", EUR: "€", GBP: "£", GBp: "GBp", HKD: "HK$", CNY: "¥", CNH: "¥", KRW: "₩", AUD: "A$", JPY: "¥", CAD: "C$", CHF: "CHF" };
@@ -100,6 +102,24 @@ const lastOf = (s) => (s.history && s.history.length ? s.history[s.history.lengt
 const isCustomer = (s) => (s.suppliers || []).length > 0;
 const custKind = (s) => (s.customer_type === "Hyperscaler" ? "Hyperscaler" : "Kunde");
 const crvOf = (s, k = state.crv) => (s.tech && s.tech.crv && s.tech.crv[k]) || null;
+const FRESH_DAYS = 3;
+/* Alle bereits gemeldeten Termine einer Aktie (Historie + heutiger Termin, falls Zahlen schon da sind). */
+function reportedList(s) {
+  const t = todayIso(), l = (s.history || []).slice();
+  if (s.next && s.next.eps_act != null && s.next.date <= t) l.push(s.next);
+  return l.sort((a, b) => a.date.localeCompare(b.date));
+}
+const lastReported = (s) => { const l = reportedList(s); return l.length ? l[l.length - 1] : null; };
+const isUpcoming = (s) => !!s.next && !(s.next.eps_act != null && s.next.date <= todayIso());
+/* Schätzung des nächsten Termins, solange noch keiner bestätigt ist: gleicher Termin im Vorjahr, sonst +91 Tage. */
+function nextEstimate(s) {
+  const last = lastReported(s);
+  if (!last) return null;
+  const base = addDays(last.date, 91);
+  const prev = (s.history || []).find((h) => Math.abs(diffDays(addDays(h.date, 364), base)) <= 20);
+  const est = prev ? addDays(prev.date, 364) : base;
+  return est > todayIso() ? est : addDays(todayIso(), 1);
+}
 
 function relDate(ticker, refDate) {
   const c = state.by[ticker];
@@ -221,7 +241,8 @@ function badgesFor(s) {
   let h = "";
   if (s.portfolio) h += badge("Portfolio", "b-pf");
   if (isCustomer(s)) h += badge(custKind(s), "b-kd");
-  if (s.next && s.next.confirmed === false) h += badge("vorläufig", "b-dash");
+  if (s.next && s.next.eps_act != null && s.next.date <= todayIso()) { const v = verdict(s.next); h += badge(v.label, VCLASS[v.k]); }
+  else if (s.next && s.next.confirmed === false) h += badge("vorläufig", "b-dash");
   return h;
 }
 const rsiClass = (r) => (r == null ? "" : r >= 70 ? "amber" : r <= 30 ? "blue" : "");
@@ -255,6 +276,14 @@ function stockRow(s, opts = {}) {
       <span>RSI <b class="${rsiClass(t?.rsi)}">${t?.rsi != null ? num(t.rsi, 0) : "–"}</b></span>
       <span>CRV <b class="${crvClass(c?.crv)}">${c ? num(c.crv, 1) : "–"}</b></span>
     </div>${ICON.chev}</a>`;
+}
+
+function resultItem({ s, h, v }) {
+  const rx = h.reaction, mv = rx ? rx.move_pct : null;
+  const revS = surprise(h.rev_act, h.rev_est);
+  const sub = h.eps_act == null ? "Zahlen folgen beim nächsten Lauf" : revS != null ? `Umsatz ${pct(revS)} vs. Erwartung` : `EPS ${num(h.eps_act)} vs. ${num(h.eps_est)}`;
+  return `<a class="item" href="#/aktie/${encodeURIComponent(s.ticker)}"><div class="grow stack-sm" style="gap:4px"><div class="line"><span class="t">${esc(s.ticker)}</span>${badge(v.label, VCLASS[v.k])}${s.portfolio ? badge("Portfolio", "b-pf") : ""}${isCustomer(s) ? badge(custKind(s), "b-kd") : ""}</div><span class="sub ell">${esc(sub)}</span></div>
+    <div class="right"><b style="font-size:15px" class="${mv == null ? "muted" : mv >= 0 ? "up" : "down"}">${mv == null ? "–" : pct(mv)}</b><span>${rx && rx.rel_volume != null ? "Vol " + num(rx.rel_volume, 1) + "×" : ""}</span></div>${ICON.chev}</a>`;
 }
 
 function spark(values) {
@@ -293,7 +322,7 @@ function rangeBounds(r) {
 function viewRadar() {
   const d = state.data;
   const [a, b] = rangeBounds(state.ui.range);
-  const inRange = d.stocks.filter((s) => s.next && s.next.date >= a && s.next.date <= b);
+  const inRange = d.stocks.filter((s) => isUpcoming(s) && s.next.date >= a && s.next.date <= b);
   const tiles = `<div class="tiles">
     <div class="tile"><b>${inRange.length}</b><span>Termine</span></div>
     <div class="tile"><b class="amber">${inRange.filter((s) => s.portfolio).length}</b><span>aus dem Portfolio</span></div>
@@ -314,19 +343,32 @@ function viewRadar() {
     <div id="radarList" class="stack">${radarList()}</div></div>`;
 }
 
+function matchQ(s) {
+  const q = state.ui.q.trim().toLowerCase();
+  return !q || s.ticker.toLowerCase().includes(q) || (s.name || "").toLowerCase().includes(q);
+}
+function recentRows() {
+  const t = todayIso(), from = addDays(t, -FRESH_DAYS), out = [];
+  for (const s of state.data.stocks) {
+    if (!passFilter(s, state.ui.filter) || !matchQ(s)) continue;
+    for (const h of reportedList(s)) if (h.date >= from && h.date <= t) out.push({ s, h, v: verdict(h) });
+  }
+  return out.sort((x, y) => y.h.date.localeCompare(x.h.date) || (y.s.portfolio - x.s.portfolio) || x.s.ticker.localeCompare(y.s.ticker));
+}
 function radarList() {
   const [a, b] = rangeBounds(state.ui.range);
-  const q = state.ui.q.trim().toLowerCase();
-  const items = state.data.stocks.filter((s) => s.next && s.next.date >= a && s.next.date <= b && passFilter(s, state.ui.filter) &&
-    (!q || s.ticker.toLowerCase().includes(q) || (s.name || "").toLowerCase().includes(q)));
-  if (!items.length) return `<div class="empty">Keine Termine für diese Auswahl.</div>`;
+  const items = state.data.stocks.filter((s) => isUpcoming(s) && s.next.date >= a && s.next.date <= b && passFilter(s, state.ui.filter) && matchQ(s));
+  const rec = state.ui.range === "next" ? [] : recentRows();
+  const recHtml = rec.length ? `<section class="day fresh"><h2>Gerade gemeldet · ${rec.length}</h2><div class="rows">${rec.map(resultItem).join("")}</div></section>` : "";
+  if (!items.length && !rec.length) return `<div class="empty">Keine Termine für diese Auswahl.</div>`;
   items.sort((x, y) => x.next.date.localeCompare(y.next.date) || (y.portfolio - x.portfolio) || x.ticker.localeCompare(y.ticker));
   const groups = [];
   for (const s of items) {
     const g = groups[groups.length - 1];
     if (g && g.date === s.next.date) g.rows.push(s); else groups.push({ date: s.next.date, rows: [s] });
   }
-  return groups.map((g) => `<section class="day ${g.date === todayIso() ? "today" : ""}"><h2>${esc(dayLabel(g.date))}</h2><div class="rows">${g.rows.map((s) => stockRow(s)).join("")}</div></section>`).join("");
+  return recHtml + (groups.length ? groups.map((g) => `<section class="day ${g.date === todayIso() ? "today" : ""}"><h2>${esc(dayLabel(g.date))}</h2><div class="rows">${g.rows.map((s) => stockRow(s)).join("")}</div></section>`).join("")
+    : `<div class="empty">Keine weiteren Termine in diesem Zeitraum.</div>`);
 }
 
 // ============================================================ Screen: Liste
@@ -454,7 +496,7 @@ function onKey(e) {
 
 window.__core = { state, KEY, TIME, CRV_NAMES, esc, num, pct, big, price, sym, dShort, dLong, dDot, dMini, dayLabel, clock, stamp, diffDays, addDays, todayIso, parse,
   verdict, VCLASS, lastOf, isCustomer, custKind, crvOf, relDate, relWord, RELCLASS, badge, badgesFor, rsiClass, crvClass, crvSwitch, stockRow, spark, ICON,
-  toDataUrl, fetchJson, setData, loadDemo, refresh, render, route, lsGet, lsSet, lsDel, hideBanner, showBanner, validate, surprise, STALE_MIN, filterOptions };
+  APP_VERSION, reportedList, lastReported, isUpcoming, nextEstimate, resultItem, FRESH_DAYS, toDataUrl, fetchJson, setData, loadDemo, refresh, render, route, lsGet, lsSet, lsDel, hideBanner, showBanner, validate, surprise, STALE_MIN, filterOptions };
 
 // ============================================================ Start
 document.addEventListener("click", onClick);

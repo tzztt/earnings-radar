@@ -58,6 +58,15 @@ Mit **Demo ansehen** kannst du die App vorab mit Beispieldaten ausprobieren.
 - Ohne Internet zeigt die App den zuletzt gespeicherten Stand und blendet oben „Offline“ ein.
 - Die Werte sind Momentaufnahmen und keine Live-Kurse.
 
+## Wie Ergebnisse nachgetragen werden
+Sobald der Kalender-Lauf Zahlen findet, passt sich die App beim nächsten Abruf automatisch an:
+- **Radar:** Der Bereich **Gerade gemeldet** (letzte 3 Tage) steht oben: Beat/Miss, Umsatz, Kursreaktion und Volumen.
+- **Aktie:** Eine Karte mit EPS und Umsatz gegen die Erwartung, Kursreaktion, Volumen und dem Kurs seit der Meldung. Frisch gemeldete Werte stehen ganz oben.
+- **Kunden und Zulieferer:** Bei jedem Kunden bzw. Zulieferer steht das Ergebnis direkt in der Liste, dazu eine Zusammenfassung („3 von 5 Kunden haben gemeldet: 2 Beat, 1 Miss · Ø Kursreaktion …“).
+- **Nächster Termin:** Ist noch keiner bestätigt, zeigt die App eine Schätzung nach dem letzten Rhythmus (als Schätzung gekennzeichnet).
+- Der **Umsatz** liegt bei Yahoo oft erst einige Stunden bis Tage nach der Meldung vor. Bis dahin steht dort „noch nicht in den Daten“.
+- Wie schnell das passiert, hängt vom Zeitplan der GitHub-Läufe ab (`.github/workflows/update.yml` im Kalender-Repository).
+
 ## Datenschutz
 - Die Abo-Adresse (mit deiner Gist-ID) wird nur im Speicher deines Geräts abgelegt.
 - Die App sendet nichts an Dritte. Sie ruft nur deine Gist-Datei ab.
@@ -74,6 +83,8 @@ Mit **Demo ansehen** kannst du die App vorab mit Beispieldaten ausprobieren.
 Als Notlösung gibt es in den **Einstellungen → Datei laden**: Du kannst eine heruntergeladene `dashboard.json` direkt auswählen.
 
 ## Updates der App
+Die aktuelle Version steht unter Einstellungen → Version (z. B. `v1.11`). So siehst du, ob die neueste Fassung auf dem iPhone angekommen ist.
+
 Neue Dateien ins Repository hochladen (gleicher Name überschreibt). Die App holt sich Änderungen beim nächsten Öffnen.
 Auf dem iPhone kann es einmal nötig sein, die App zu schließen und neu zu öffnen.
 
