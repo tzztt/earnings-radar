@@ -5,8 +5,8 @@
 
 // ============================================================ Konstanten & Zustand
 // Version der App: bei jeder Änderung hier hochzählen (wird in den Einstellungen angezeigt). Muster: x.xx
-const APP_VERSION = "1.11";
-const KEY = { url: "er.url", data: "er.data", crv: "er.crv", demo: "er.demo" };
+const APP_VERSION = "1.13";
+const KEY = { url: "er.url", data: "er.data", crv: "er.crv", demo: "er.demo", seen: "er.seen" };
 const TIME = { bmo: "vorbörslich", amc: "nachbörslich", dmh: "im Handel" };
 const CUR = { USD: "$", EUR: "€", GBP: "£", GBp: "GBp", HKD: "HK$", CNY: "¥", CNH: "¥", KRW: "₩", AUD: "A$", JPY: "¥", CAD: "C$", CHF: "CHF" };
 const CRV_NAMES = { A: "A Struktur", B: "B ATR", C: "C Pullback" };
@@ -103,6 +103,42 @@ const isCustomer = (s) => (s.suppliers || []).length > 0;
 const custKind = (s) => (s.customer_type === "Hyperscaler" ? "Hyperscaler" : "Kunde");
 const crvOf = (s, k = state.crv) => (s.tech && s.tech.crv && s.tech.crv[k]) || null;
 const FRESH_DAYS = 3;
+const NEW_DAYS = 14;   // so lange kann ein Ergebnis als "Neu" gelten, wenn es noch nicht angesehen wurde
+/* "Neu seit deinem letzten Besuch": Das Gerät merkt sich, welche Ergebnisse (Ticker|Datum) du schon gesehen hast.
+   Beim allerersten Start gilt alles Vorhandene als gesehen, damit nicht alles "Neu" ist. Im Demo-Modus ist die Funktion aus. */
+const rkey = (s, h) => `${s.ticker}|${h.date}`;
+function initSeen() {
+  state.seen = null;
+  if (state.demo || !state.data) return;
+  let set = null;
+  try { const j = JSON.parse(lsGet(KEY.seen) || "null"); if (Array.isArray(j)) set = new Set(j); } catch { /* neu anlegen */ }
+  if (!set) {
+    set = new Set();
+    for (const s of state.data.stocks) for (const h of reportedList(s)) set.add(rkey(s, h));
+    lsSet(KEY.seen, JSON.stringify([...set]));
+  }
+  state.seen = set;
+}
+const isNew = (s, h) => !!state.seen && h.eps_act != null && diffDays(todayIso(), h.date) <= NEW_DAYS && !state.seen.has(rkey(s, h));
+const newOf = (s) => reportedList(s).filter((h) => isNew(s, h));
+function newTotal() { let n = 0; if (state.seen && state.data) for (const s of state.data.stocks) n += newOf(s).length; return n; }
+function markSeen(pairs) {
+  if (!state.seen || !pairs.length) return;
+  pairs.forEach(([s, h]) => state.seen.add(rkey(s, h)));
+  lsSet(KEY.seen, JSON.stringify([...state.seen].slice(-2000)));
+}
+function markAllSeen() {
+  const p = [];
+  if (state.data) for (const s of state.data.stocks) for (const h of newOf(s)) p.push([s, h]);
+  markSeen(p);
+}
+function updateTabDot() {
+  const a = document.querySelector('#tabbar a[data-tab="ergebnisse"]');
+  if (!a) return;
+  const old = a.querySelector(".tabdot"); if (old) old.remove();
+  const n = newTotal();
+  if (n > 0) { const d = document.createElement("span"); d.className = "tabdot"; d.textContent = String(n); d.setAttribute("aria-label", `${n} neue Ergebnisse`); a.appendChild(d); }
+}
 /* Alle bereits gemeldeten Termine einer Aktie (Historie + heutiger Termin, falls Zahlen schon da sind). */
 function reportedList(s) {
   const t = todayIso(), l = (s.history || []).slice();
@@ -175,6 +211,7 @@ function setData(data, opts = {}) {
   state.sections = secs;
   state.demo = !!opts.demo;
   state.fromCache = !!opts.fromCache;
+  initSeen();
 }
 
 function shiftDates(data) {
@@ -239,6 +276,7 @@ const ICON = {
 const badge = (txt, cls) => `<span class="badge ${cls}">${esc(txt)}</span>`;
 function badgesFor(s) {
   let h = "";
+  if (newOf(s).length) h += badge("Neu", "b-new");
   if (s.portfolio) h += badge("Portfolio", "b-pf");
   if (isCustomer(s)) h += badge(custKind(s), "b-kd");
   if (s.next && s.next.eps_act != null && s.next.date <= todayIso()) { const v = verdict(s.next); h += badge(v.label, VCLASS[v.k]); }
@@ -282,7 +320,7 @@ function resultItem({ s, h, v }) {
   const rx = h.reaction, mv = rx ? rx.move_pct : null;
   const revS = surprise(h.rev_act, h.rev_est);
   const sub = h.eps_act == null ? "Zahlen folgen beim nächsten Lauf" : revS != null ? `Umsatz ${pct(revS)} vs. Erwartung` : `EPS ${num(h.eps_act)} vs. ${num(h.eps_est)}`;
-  return `<a class="item" href="#/aktie/${encodeURIComponent(s.ticker)}"><div class="grow stack-sm" style="gap:4px"><div class="line"><span class="t">${esc(s.ticker)}</span>${badge(v.label, VCLASS[v.k])}${s.portfolio ? badge("Portfolio", "b-pf") : ""}${isCustomer(s) ? badge(custKind(s), "b-kd") : ""}</div><span class="sub ell">${esc(sub)}</span></div>
+  return `<a class="item" href="#/aktie/${encodeURIComponent(s.ticker)}"><div class="grow stack-sm" style="gap:4px"><div class="line"><span class="t">${esc(s.ticker)}</span>${isNew(s, h) ? badge("Neu", "b-new") : ""}${badge(v.label, VCLASS[v.k])}${s.portfolio ? badge("Portfolio", "b-pf") : ""}${isCustomer(s) ? badge(custKind(s), "b-kd") : ""}</div><span class="sub ell">${esc(sub)}</span></div>
     <div class="right"><b style="font-size:15px" class="${mv == null ? "muted" : mv >= 0 ? "up" : "down"}">${mv == null ? "–" : pct(mv)}</b><span>${rx && rx.rel_volume != null ? "Vol " + num(rx.rel_volume, 1) + "×" : ""}</span></div>${ICON.chev}</a>`;
 }
 
@@ -319,6 +357,10 @@ function rangeBounds(r) {
 }
 
 // ============================================================ Screen: Radar
+function newBar() {
+  const n = newTotal();
+  return n ? `<a class="newbar" href="#/ergebnisse"><span><b>${n} neue${n === 1 ? "s" : ""} Ergebnis${n === 1 ? "" : "se"}</b> seit deinem letzten Besuch</span><span>ansehen ›</span></a>` : "";
+}
 function viewRadar() {
   const d = state.data;
   const [a, b] = rangeBounds(state.ui.range);
@@ -336,6 +378,7 @@ function viewRadar() {
         <a class="icon-btn" href="#/einstellungen" aria-label="Einstellungen">${ICON.gear}</a>
       </div></header>
     ${state.ui.searchOpen ? `<div class="search">${ICON.search}<input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="characters" placeholder="Ticker oder Name suchen" aria-label="Suchen" value="${esc(state.ui.q)}"></div>` : ""}
+    ${newBar()}
     ${tiles}
     <div class="seg" role="tablist" aria-label="Zeitraum">${ranges.map(([k, l]) => `<button role="tab" data-act="range" data-v="${k}" aria-selected="${state.ui.range === k}">${l}</button>`).join("")}</div>
     <div class="chips" role="group" aria-label="Filter">${filterOptions().map(([k, l]) => `<button class="chip" data-act="filter" data-v="${esc(k)}" aria-pressed="${state.ui.filter === k}">${esc(l)}</button>`).join("")}</div>
@@ -442,6 +485,8 @@ function render(opts = {}) {
   }
   view.innerHTML = html;
   setTab(r);
+  if (state.data && r.name === "aktie" && state.by[r.arg]) markSeen(newOf(state.by[r.arg]).map((h) => [state.by[r.arg], h]));
+  updateTabDot();
   const nc = view.querySelector(".chips");
   if (nc && opts.keep) nc.scrollLeft = chipX;
   if (opts.keep) window.scrollTo(0, sy); else window.scrollTo(0, 0);
@@ -456,6 +501,7 @@ function onClick(e) {
   const ui = state.ui;
   switch (a) {
     case "range": ui.range = v; render({ keep: true }); break;
+    case "seenAll": markAllSeen(); render({ keep: true }); break;
     case "filter": ui.filter = v; render({ keep: true }); break;
     case "crv": state.crv = v; lsSet(KEY.crv, v); render({ keep: true }); break;
     case "listSort": ui.listSort = v; render({ keep: true }); break;
@@ -496,7 +542,7 @@ function onKey(e) {
 
 window.__core = { state, KEY, TIME, CRV_NAMES, esc, num, pct, big, price, sym, dShort, dLong, dDot, dMini, dayLabel, clock, stamp, diffDays, addDays, todayIso, parse,
   verdict, VCLASS, lastOf, isCustomer, custKind, crvOf, relDate, relWord, RELCLASS, badge, badgesFor, rsiClass, crvClass, crvSwitch, stockRow, spark, ICON,
-  APP_VERSION, reportedList, lastReported, isUpcoming, nextEstimate, resultItem, FRESH_DAYS, toDataUrl, fetchJson, setData, loadDemo, refresh, render, route, lsGet, lsSet, lsDel, hideBanner, showBanner, validate, surprise, STALE_MIN, filterOptions };
+  APP_VERSION, isNew, newTotal, markAllSeen, reportedList, lastReported, isUpcoming, nextEstimate, resultItem, FRESH_DAYS, toDataUrl, fetchJson, setData, loadDemo, refresh, render, route, lsGet, lsSet, lsDel, hideBanner, showBanner, validate, surprise, STALE_MIN, filterOptions };
 
 // ============================================================ Start
 document.addEventListener("click", onClick);
@@ -516,7 +562,20 @@ document.addEventListener("visibilitychange", () => {
 
 window.__start = async function start() {
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    // Updates zuverlässig übernehmen: sw.js nie aus dem HTTP-Cache, bei jedem Öffnen prüfen,
+    // und die Seite einmal neu laden, sobald eine neue Fassung die Kontrolle übernimmt.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController && !reloaded) { reloaded = true; location.reload(); }
+    });
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+      .then((reg) => {
+        reg.update().catch(() => {});
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") reg.update().catch(() => {});
+        });
+      }).catch(() => {});
   }
   try {
     if (lsGet(KEY.demo) === "1") { await loadDemo(); render(); return; }

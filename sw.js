@@ -1,6 +1,6 @@
 // Service Worker: hält die App offline verfügbar. Daten (Gist) werden NICHT hier gecacht,
 // sondern von der App selbst im Browser-Speicher abgelegt.
-const CACHE = "earnings-radar-v1.11"; // gleiche Nummer wie APP_VERSION in app.js
+const CACHE = "earnings-radar-v1.13"; // gleiche Nummer wie APP_VERSION in app.js
 const SHELL = ["./", "index.html", "app.css", "app.js", "screens.js", "manifest.webmanifest", "icon.svg",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png", "demo.json"];
 
@@ -23,7 +23,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: "no-cache" })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();

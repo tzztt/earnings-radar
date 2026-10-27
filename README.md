@@ -67,6 +67,12 @@ Sobald der Kalender-Lauf Zahlen findet, passt sich die App beim nächsten Abruf 
 - Der **Umsatz** liegt bei Yahoo oft erst einige Stunden bis Tage nach der Meldung vor. Bis dahin steht dort „noch nicht in den Daten“.
 - Wie schnell das passiert, hängt vom Zeitplan der GitHub-Läufe ab (`.github/workflows/update.yml` im Kalender-Repository).
 
+## „Neu seit deinem letzten Besuch“
+- Die App merkt sich auf deinem Gerät, welche Ergebnisse du schon gesehen hast. Alles Neue (bis 14 Tage alt) bekommt ein gelbes **Neu**.
+- Es erscheint an der Aktie (Radar, Liste, Ergebnisse, Detailseite), als Zahl am Tab **Ergebnisse** und als Hinweisleiste oben im Radar.
+- Das Neu-Zeichen verschwindet, sobald du die Aktie öffnest, oder mit **Alle gelesen** im Tab Ergebnisse.
+- Beim allerersten Start gilt alles Vorhandene als gesehen. Im Demo-Modus ist die Funktion aus.
+
 ## Datenschutz
 - Die Abo-Adresse (mit deiner Gist-ID) wird nur im Speicher deines Geräts abgelegt.
 - Die App sendet nichts an Dritte. Sie ruft nur deine Gist-Datei ab.
@@ -83,7 +89,7 @@ Sobald der Kalender-Lauf Zahlen findet, passt sich die App beim nächsten Abruf 
 Als Notlösung gibt es in den **Einstellungen → Datei laden**: Du kannst eine heruntergeladene `dashboard.json` direkt auswählen.
 
 ## Updates der App
-Die aktuelle Version steht unter Einstellungen → Version (z. B. `v1.11`). So siehst du, ob die neueste Fassung auf dem iPhone angekommen ist.
+Die aktuelle Version steht unter Einstellungen → Version (z. B. `v1.12`). So siehst du, ob die neueste Fassung auf dem iPhone angekommen ist.
 
 Neue Dateien ins Repository hochladen (gleicher Name überschreibt). Die App holt sich Änderungen beim nächsten Öffnen.
 Auf dem iPhone kann es einmal nötig sein, die App zu schließen und neu zu öffnen.

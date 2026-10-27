@@ -4,7 +4,7 @@
 const C = window.__core;
 const { state, KEY, TIME, CRV_NAMES, esc, num, pct, big, price, sym, dShort, dLong, dDot, dMini, dayLabel, clock, stamp, diffDays, todayIso,
   verdict, VCLASS, lastOf, isCustomer, custKind, crvOf, relDate, relWord, RELCLASS, badge, badgesFor, rsiClass, crvClass, crvSwitch, stockRow, spark, ICON,
-  APP_VERSION, reportedList, lastReported, isUpcoming, nextEstimate, resultItem, FRESH_DAYS,
+  APP_VERSION, isNew, newTotal, markAllSeen, reportedList, lastReported, isUpcoming, nextEstimate, resultItem, FRESH_DAYS,
   toDataUrl, fetchJson, setData, loadDemo, refresh, render, lsGet, lsSet, lsDel, hideBanner, validate } = C;
 
 // ============================================================ Einrichtung
@@ -48,7 +48,7 @@ window.__startDemo = async () => {
   catch (e) { state.ui.setupError = "Demo konnte nicht geladen werden: " + e.message; render(); }
 };
 window.__reset = () => {
-  [KEY.url, KEY.data, KEY.demo].forEach(lsDel);
+  [KEY.url, KEY.data, KEY.demo, KEY.seen].forEach(lsDel);
   state.data = null; state.by = {}; state.demo = false; state.ui.setupError = ""; state.ui.setupVal = "";
   hideBanner(); location.hash = "#/"; render();
 };
@@ -295,6 +295,7 @@ window.__ergebnisse = () => {
   for (const r of rows) { const g = groups[groups.length - 1]; if (g && g.date === r.h.date) g.rows.push(r); else groups.push({ date: r.h.date, rows: [r] }); }
   const pending = cnt("pending");
   return `<div class="stack"><header class="hdr"><div><h1>Ergebnisse</h1><p>${all.length} Termine in ${ui.resDays} Tagen${pending ? `, ${pending} noch ohne Zahlen` : ""}</p></div></header>
+    ${newTotal() ? `<div class="newbar"><span><b>${newTotal()} neu</b> seit deinem letzten Besuch</span><button class="btn" data-act="seenAll">Alle gelesen</button></div>` : ""}
     <div class="tiles"><div class="tile"><b class="up">${cnt("beat")}</b><span>Beat</span></div><div class="tile"><b class="down">${cnt("miss")}</b><span>Miss</span></div><div class="tile"><b>${cnt("inline")}</b><span>im Rahmen</span></div></div>
     <div class="seg" role="group" aria-label="Zeitraum">${[[7, "7 Tage"], [30, "30 Tage"], [90, "90 Tage"]].map(([n, l]) => `<button data-act="resDays" data-v="${n}" aria-pressed="${ui.resDays === n}">${l}</button>`).join("")}</div>
     <div class="seg" role="group" aria-label="Filter">${[["all", "Alle"], ["beat", "Beat"], ["miss", "Miss"]].map(([k, l]) => `<button data-act="resFilter" data-v="${k}" aria-pressed="${ui.resFilter === k}">${l}</button>`).join("")}</div>
